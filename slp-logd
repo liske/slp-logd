@@ -88,7 +88,7 @@ END {
 	}
 }
 
-my $port = '/dev/ttyS0';
+my $port = '/dev/ttyUSB0';
 
 $main::logger->notice("opening serial port $port...");
 
@@ -98,4 +98,22 @@ $po->databits(8);
 $po->parity("none");
 $po->stopbits(1);
 $po->handshake("none");
-$po->read_const_time(0);
+$po->read_char_time(1000);
+$po->read_const_time(1000);
+
+open(FH, '>', 'dump');
+while(!$po->reset_error()) {
+    my $d = $po->input();
+    if($d ne '') {
+	print "'$d'\n";
+	print FH "|$d|\n";
+$|++;
+    print '.';
+$|--;
+    }
+    else {
+	sleep 5;
+    }
+
+    sleep 5;
+}
