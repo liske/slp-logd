@@ -1,0 +1,101 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+use Getopt::Std;
+use Log::Dispatch;
+use Log::Dispatch::Screen;
+use Log::Dispatch::Syslog;
+use Proc::Daemon;
+use Proc::PID::File;
+
+use Device::SerialPort qw(:ALL 0.07);
+
+$0 = 'slp-logd';
+
+our $opt_d;
+our $opt_f;
+our $opt_r = '/var/run';
+getopts('r:df');
+
+my $logfmt = sub { my %p = @_; chomp($p{'message'}); return ("[$p{level}] $p{message}\n"); };
+$main::logger = Log::Dispatch->new(callbacks => $logfmt);
+$main::logger->add(
+    Log::Dispatch::Screen->new(
+	name => 'console',
+	min_level => ($opt_f ? ($opt_d ? 'info' : 'notice') : 'warning'),
+    )
+);
+$main::logger->add(
+    Log::Dispatch::Syslog->new(
+	name => 'syslog',
+	min_level => ($opt_d ? 'info' : 'notice'),
+	ident => 'slp-logd',
+	logopt => 'pid',
+	facility => 'daemon',
+    )
+) unless($opt_f);
+
+sub WARN_handler {
+    my($signal) = @_;
+
+	if(defined $main::logger) {
+		$main::logger->warning("WARNING: $signal");
+	}
+	else {
+		printf STDERR "WARNING: $signal\n";
+	}
+}
+
+sub DIE_handler {
+    my($signal) = @_;
+
+	if(defined $main::logger) {
+		$main::logger->critical("ERROR: $signal");
+	}
+	else {
+		printf STDERR "ERROR: $signal\n";
+	}
+
+	exit 1;
+}
+
+sub INT_handler {
+    if(defined $main::logger) {
+	$main::logger->notice('Got SIGINT, terminating.');
+    }
+    else {
+	printf STDERR "Got SIGINT, terminating.\n";
+    }
+
+    exit;
+}
+
+$SIG{__WARN__} = 'WARN_handler';
+$SIG{__DIE__}  = 'DIE_handler';
+$SIG{INT} = 'INT_handler';
+$SIG{PIPE} = 'IGNORE';
+$SIG{CHLD} = 'IGNORE';
+
+END {
+	my $m = "terminated (rc=$?)";
+	if(defined $main::logger) {
+		$main::logger->notice($m);
+	}
+	else {
+		print STDERR "$m\n";
+	}
+}
+
+my $port = '/dev/ttyS0';
+
+$main::logger->notice("opening serial port $port...");
+
+my $po = new Device::SerialPort($port) || die "$!";
+$po->baudrate(9600);
+$po->databits(8);
+$po->parity("none");
+$po->stopbits(1);
+$po->handshake("none");
+$po->read_const_time(0);
